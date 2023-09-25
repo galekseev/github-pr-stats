@@ -1,69 +1,67 @@
-require('dotenv').config();
-const { Octokit } = require("octokit");
+const { Octokit } = require('octokit');
 const fs = require('fs');
+require('dotenv').config();
 
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
-
-async function getPullRequests(octokit, owner, repo, dateFrom, dateTo) {
+async function getPullRequests (octokit, owner, repo, dateFrom, dateTo) {
     const iterator = await octokit.paginate.iterator('GET /repos/{owner}/{repo}/pulls?state=all', {
-        owner: owner,
-        repo: repo,
+        owner,
+        repo,
         per_page: 100,
         headers: {
-          'X-GitHub-Api-Version': '2022-11-28'
+            'X-GitHub-Api-Version': '2022-11-28'
         }
     });
 
     let prs = [];
-    for await (const {data} of iterator) {
+    for await (const { data } of iterator) {
         prs = [...prs, ...data.filter(pr => filterPullRequestList(pr, dateFrom, dateTo))];
     }
 
     return prs;
 }
 
-async function getReviews(octokit, owner, repo, pull_number) {
+async function getReviews (octokit, owner, repo, pullId) {
     const response = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews', {
-        pull_number: pull_number,
-        owner: owner,
-        repo: repo,
+        pull_number: pullId,
+        owner,
+        repo,
         headers: {
             'X-GitHub-Api-Version': '2022-11-28'
         }
     });
 
-    return {pull_number, reviews: response.data};
+    return { pull_number: pullId, reviews: response.data };
 }
 
-function getDetailedStats(pull_requests, dateFrom, dateTo){
-
+function getDetailedStats (pullRequests, dateFrom, dateTo) {
     let grouped = [];
-    grouped = pull_requests.reduce((acc, pr) => {
-
+    grouped = pullRequests.reduce((acc, pr) => {
         const key = `${pr.owner}/${pr.repo}/${pr.author}`;
 
-        if (!acc[key]) {
-          acc[key] = { created: 0, commented: 0, approved: 0 };
-        }
-      
-        if (new Date(pr.created_at) > dateFrom & new Date(pr.created_at) < dateTo){
+        const validPullRequestInterval = new Date(pr.created_at) > dateFrom & new Date(pr.created_at) < dateTo;
+        if (validPullRequestInterval) {
+            if (!acc[key]) {
+                acc[key] = { created: 0, commented: 0, approved: 0 };
+            }
+
             acc[key].created += 1;
         }
-      
+
         const reviewsCommented = {};
         const reviewsApproved = {};
 
         pr.reviews.forEach(review => {
-            const rightInterval = new Date(review.submited_at) > dateFrom & new Date(review.submited_at) < dateTo;
+            const validReviewInterval = new Date(review.submited_at) > dateFrom & new Date(review.submited_at) < dateTo;
             const alignReview = pr.author !== review.reviewer;
 
-            if (rightInterval && alignReview) {
+            if (validReviewInterval && alignReview) {
                 const reviewerKey = `${pr.owner}/${pr.repo}/${review.reviewer}`;
                 if (!acc[reviewerKey]) {
                     acc[reviewerKey] = { created: 0, commented: 0, approved: 0 };
                 }
-      
+
                 if (review.state === 'COMMENTED' && !reviewsCommented[reviewerKey]) {
                     acc[reviewerKey].commented += 1;
                     reviewsCommented[reviewerKey] = true;
@@ -73,35 +71,35 @@ function getDetailedStats(pull_requests, dateFrom, dateTo){
                 }
             }
         });
-      
-        return acc;
-      }, {});
 
-      grouped = Object.keys(grouped).map(key => {
+        return acc;
+    }, {});
+
+    grouped = Object.keys(grouped).map(key => {
         const [owner, repo, author] = key.split('/');
         return {
-          owner,
-          repo,
-          author,
-          ...grouped[key]
+            owner,
+            repo,
+            author,
+            ...grouped[key]
         };
-      });
+    });
 
-      return grouped;
+    return grouped;
 }
 
-function getSummary(stats){
+function getSummary (stats) {
     const finalResult = stats.reduce((acc, item) => {
         if (!acc[item.author]) {
-          acc[item.author] = {
-            pull_requests: 0,
-            repos: new Set(),
-            commented: 0,
-            approved: 0,
-            reposReviewed: new Set()
-          };
+            acc[item.author] = {
+                pull_requests: 0,
+                repos: new Set(),
+                commented: 0,
+                approved: 0,
+                reposReviewed: new Set()
+            };
         }
-      
+
         acc[item.author].pull_requests += item.created;
 
         if (item.created > 0) {
@@ -109,36 +107,36 @@ function getSummary(stats){
         }
         acc[item.author].commented += item.commented;
         acc[item.author].approved += item.approved;
-      
+
         if (item.commented > 0 || item.approved > 0) {
-          acc[item.author].reposReviewed.add(`${item.owner}/${item.repo}`);
+            acc[item.author].reposReviewed.add(`${item.owner}/${item.repo}`);
         }
-      
+
         return acc;
-      }, {});
-      
-      const finalArray = Object.keys(finalResult).map(author => {
+    }, {});
+
+    const finalArray = Object.keys(finalResult).map(author => {
         return {
-          author,
-          pull_requests: finalResult[author].pull_requests,
-          repos: finalResult[author].repos.size,
-          commented: finalResult[author].commented,
-          approved: finalResult[author].approved,
-          repos_reviewed: finalResult[author].reposReviewed.size
+            author,
+            pull_requests: finalResult[author].pull_requests,
+            repos: finalResult[author].repos.size,
+            commented: finalResult[author].commented,
+            approved: finalResult[author].approved,
+            repos_reviewed: finalResult[author].reposReviewed.size
         };
-      });
-      
-      return finalArray;
+    });
+
+    return finalArray;
 }
 
-function filterPullRequestList(pr, dateFrom, dateTo) {
+function filterPullRequestList (pr, dateFrom, dateTo) {
     const open = pr.state === 'open';
     const createdAfter = new Date(pr.created_at) > dateFrom;
     const createdBefore = new Date(pr.created_at) < dateTo;
-    return  open || (createdAfter && createdBefore);
+    return open || (createdAfter && createdBefore);
 }
 
-function displayProgress(progress, total, label){
+function displayProgress (progress, total, label) {
     const barLength = 60;
     const fill = Math.floor(progress * barLength / total);
     const progressBar = '[' + '■'.repeat(fill) + ' '.repeat(barLength - fill) + ']';
@@ -146,7 +144,7 @@ function displayProgress(progress, total, label){
     process.stdout.write(`\r${progressBar} ${progress}/${total} ${label}`);
 }
 
-function displayDone(total){
+function displayDone (total) {
     const barLength = 60;
     const progressBar = '[' + '■'.repeat(barLength) + ']';
     process.stdout.write('\x1B[2K');
@@ -154,12 +152,12 @@ function displayDone(total){
     process.stdout.write('\n');
 }
 
-async function main(repos, dateFrom, dateTo, filename = ''){
+async function main (repos, dateFrom, dateTo, filename = '') {
     // Compare: https://docs.github.com/en/rest/reference/users#get-the-authenticated-user
     const {
-        data: { login },
+        data: { login }
     } = await octokit.rest.users.getAuthenticated();
-    console.log("Requesting on behalf of %s", login);
+    console.log('Requesting on behalf of %s', login);
 
     console.log('Reading pull request list from repos');
     let prs = [];
@@ -169,9 +167,9 @@ async function main(repos, dateFrom, dateTo, filename = ''){
 
         displayProgress(progress + 1, total, `@${repo.owner}/${repo.repo}`);
 
-        const pull_requests = await getPullRequests(octokit, repo.owner, repo.repo, dateFrom, dateTo);
+        const pullRequests = await getPullRequests(octokit, repo.owner, repo.repo, dateFrom, dateTo);
 
-        prs = [...prs, ...pull_requests.map(pr =>( {
+        prs = [...prs, ...pullRequests.map(pr => ({
             owner: repo.owner,
             repo: repo.repo,
             number: pr.number,
@@ -181,7 +179,7 @@ async function main(repos, dateFrom, dateTo, filename = ''){
             closed_at: pr.closed_at,
             merged_at: pr.merged_at,
             author: pr.user.login,
-            title: pr.title,
+            title: pr.title
         }))];
     }
 
@@ -197,7 +195,7 @@ async function main(repos, dateFrom, dateTo, filename = ''){
         item.reviews = reviews.reviews.map(review => ({
             state: review.state,
             reviewer: review.user.login,
-            submited_at: review.submitted_at,
+            submited_at: review.submitted_at
         }));
     }
 
@@ -214,16 +212,13 @@ async function main(repos, dateFrom, dateTo, filename = ''){
         console.log('Saving results to file...');
         try {
             fs.writeFileSync(filename, JSON.stringify(detailedStats, null, 2));
-        }
-        catch (err) {
+        } catch (err) {
             console.error(err);
         }
     }
-    //console.log(prs);
-    //console.log(JSON.stringify(prs, null, 2));
+    // console.log(prs);
+    // console.log(JSON.stringify(prs, null, 2));
 }
-
-
 
 const dateFrom = new Date('2023-09-15T00:00:00Z');
 // dateFrom.setHours(0, 0, 0, 0);
@@ -256,7 +251,7 @@ const repos = [
     { owner: '1inch', repo: 'ERADICATE3' },
     { owner: '1inch', repo: 'solidity-audit-checklist' },
     { owner: '1inch', repo: 'minimal-erc20-wrapper' },
-    { owner: '1inch', repo: 'public-pmm' },
-]
+    { owner: '1inch', repo: 'public-pmm' }
+];
 
-main(repos, dateFrom, dateTo).then(() => { console.log("Done"); });
+main(repos, dateFrom, dateTo).then(() => { console.log('Done'); });
