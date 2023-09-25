@@ -1,0 +1,12 @@
+{
+  "name": "github-pr-stats",
+  "version": "0.1",
+  "description": "get pr stats from github",
+  "main": "get-stats.js",
+  "author": "camoseed.eth",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "16.3.1",
+    "octokit": "3.1.0"
+  }
+}
